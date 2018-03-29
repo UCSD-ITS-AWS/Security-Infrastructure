@@ -1,0 +1,265 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "UCSD Log Source AWS CloudFormation Template - this template is meant to be applied to pre-approved accounts and configures CloudWatch Logs to forward to the UCSD log aggregation process.",
+    "Outputs": {
+        "CloudTrailARN": {
+            "Description": "ARN of the CloudTrail Trail configured for this log source deployment.",
+            "Value": {
+                "Fn::GetAtt": [
+                    "SecurityTrail",
+                    "Arn"
+                ]
+            }
+        },
+        "CloudWatchLogGroupARN": {
+            "Description": "ARN of the CloudWatch Log Group created to flow logs to the centralized logging stream.",
+            "Value": {
+                "Fn::GetAtt": [
+                    "SecurityLogShippingGroup",
+                    "Arn"
+                ]
+            }
+        },
+        "CloudWatchLogGroupName": {
+            "Description": "Name of the CloudWatch Log Group created to flow logs to the centralized logging stream.",
+            "Value": {
+                "Ref": "SecurityLogShippingGroup"
+            }
+        },
+        "VPCFlowLogDeliveryLogsPermissionArn": {
+            "Description": "ARN of the IAM role for VPC Flow Logs to use within this account to ship VPC flow logs through.",
+            "Value": {
+                "Fn::GetAtt": [
+                    "VPCFlowLogToCWLIAMRole",
+                    "Arn"
+                ]
+            }
+        }
+    },
+    "Parameters": {
+        "CloudTrailBucketName": {
+            "Default": "",
+            "Description": "Name of the S3 Bucket for delivery of CloudTrail logs",
+            "Type": "String"
+        },
+        "CloudTrailIncludeGlobal": {
+            "AllowedValues": [
+                "true",
+                "false"
+            ],
+            "Default": "true",
+            "Description": "Flag indicating that CloudTrail is configured to capture global service events.",
+            "Type": "String"
+        },
+        "CloudTrailIsLogging": {
+            "AllowedValues": [
+                "true",
+                "false"
+            ],
+            "Default": "false",
+            "Description": "Flag indicating that CloudTrail is configured to send logs.",
+            "Type": "String"
+        },
+        "CloudTrailKeyPrefix": {
+            "Default": "",
+            "Description": "Key name prefix for logs being sent to S3",
+            "Type": "String"
+        },
+        "CloudTrailMultiRegion": {
+            "AllowedValues": [
+                "true",
+                "false"
+            ],
+            "Default": "true",
+            "Description": "Flag indicating that CloudTrail is to be configured in multi-region mode",
+            "Type": "String"
+        },
+        "LogDeliveryDestinationArn": {
+            "Default": "",
+            "Description": "ARN of the Log Destination to send logs to.",
+            "Type": "String"
+        },
+        "LogGroupRetentionInDays": {
+            "Default": 1,
+            "Description": "Number of days to retain logs in the CloudWatch Log Group",
+            "MaxValue": 14,
+            "MinValue": 1,
+            "Type": "Number"
+        }
+    },
+    "Resources": {
+        "PrimaryLogStream": {
+            "Properties": {
+                "LogGroupName": {
+                    "Ref": "SecurityLogShippingGroup"
+                },
+                "LogStreamName": "PrimaryLogStream"
+            },
+            "Type": "AWS::Logs::LogStream"
+        },
+        "SecurityLogShippingFilter": {
+            "Properties": {
+                "DestinationArn": {
+                    "Ref": "LogDeliveryDestinationArn"
+                },
+                "FilterPattern": "",
+                "LogGroupName": {
+                    "Ref": "SecurityLogShippingGroup"
+                }
+            },
+            "Type": "AWS::Logs::SubscriptionFilter"
+        },
+        "SecurityLogShippingGroup": {
+            "Properties": {
+                "LogGroupName": "SecurityLogShippingGroup",
+                "RetentionInDays": {
+                    "Ref": "LogGroupRetentionInDays"
+                }
+            },
+            "Type": "AWS::Logs::LogGroup"
+        },
+        "SecurityTrail": {
+            "Properties": {
+                "IncludeGlobalServiceEvents": {
+                    "Ref": "CloudTrailIncludeGlobal"
+                },
+                "IsLogging": {
+                    "Ref": "CloudTrailIsLogging"
+                },
+                "IsMultiRegionTrail": {
+                    "Ref": "CloudTrailMultiRegion"
+                },
+                "S3BucketName": {
+                    "Ref": "CloudTrailBucketName"
+                },
+                "S3KeyPrefix": {
+                    "Ref": "CloudTrailKeyPrefix"
+                },
+                "TrailName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            "SecurityTrail",
+                            {
+                                "Ref": "AWS::Region"
+                            }
+                        ]
+                    ]
+                }
+            },
+            "Type": "AWS::CloudTrail::Trail"
+        },
+        "SplunkAddonUser": {
+            "Properties": {
+                "UserName": "splunkaddonuser"
+            },
+            "Type": "AWS::IAM::User"
+        },
+        "VPCFlowLogToCWLIAMRole": {
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": [
+                                "sts:AssumeRole"
+                            ],
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "vpc-flow-logs.amazonaws.com"
+                            }
+                        }
+                    ]
+                }
+            },
+            "Type": "AWS::IAM::Role"
+        },
+        "VPCFlowLogToCWLPolicy": {
+            "Properties": {
+                "PolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": [
+                                "logs:CreateLogGroup",
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents",
+                                "logs:DescribeLogGroups",
+                                "logs:DescribeLogStreams"
+                            ],
+                            "Effect": "Allow",
+                            "Resource": [
+                                "*"
+                            ]
+                        }
+                    ]
+                },
+                "PolicyName": "vpcflowlogtocwlpolicy20180213",
+                "Roles": [
+                    {
+                        "Ref": "VPCFlowLogToCWLIAMRole"
+                    }
+                ]
+            },
+            "Type": "AWS::IAM::Policy"
+        },
+        "cloudtrailSplunkPolicy": {
+            "Properties": {
+                "PolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": [
+                                "sqs:GetQueueAttributes",
+                                "sqs:ListQueues",
+                                "sqs:ReceiveMessage",
+                                "sqs:GetQueueUrl",
+                                "sqs:DeleteMessage",
+                                "s3:Get*",
+                                "s3:List*",
+                                "s3:Delete*"
+                            ],
+                            "Effect": "Allow",
+                            "Resource": [
+                                "*"
+                            ]
+                        }
+                    ]
+                },
+                "PolicyName": "cloudtrailsplunkuser20180213",
+                "Roles": [
+                    {
+                        "Ref": "VPCFlowLogToCWLIAMRole"
+                    }
+                ]
+            },
+            "Type": "AWS::IAM::Policy"
+        },
+        "cloudwatchSplunkPolicy": {
+            "Properties": {
+                "PolicyDocument": {
+                    "Statement": [
+                        {
+                            "Action": [
+                                "autoscaling:Describe*",
+                                "cloudwatch:Describe*",
+                                "cloudwatch:Get*",
+                                "cloudwatch:List*",
+                                "sns:Get*",
+                                "sns:List*"
+                            ],
+                            "Effect": "Allow",
+                            "Resource": [
+                                "*"
+                            ]
+                        }
+                    ]
+                },
+                "PolicyName": "cloudwatchsplunkuser20180213",
+                "Roles": [
+                    {
+                        "Ref": "VPCFlowLogToCWLIAMRole"
+                    }
+                ]
+            },
+            "Type": "AWS::IAM::Policy"
+        }
+    }
+}
